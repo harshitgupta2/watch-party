@@ -232,27 +232,13 @@ Verified locally: created a room, changed video/seek/play, confirmed the row in 
 
 ## Deployment (Render)
 
-### Option A — Blueprint (recommended)
+Three separate Render resources, deployed from this repo's `main` branch:
 
-This repo includes [render.yaml](render.yaml), which declares all three resources (database, backend, frontend) at once:
-
-1. Render dashboard → **New +** → **Blueprint** → connect this repo → **Apply**. Render provisions the Postgres database, backend Web Service, and frontend Static Site from `render.yaml` in one go.
-2. Once both services have deployed and been assigned their `*.onrender.com` URLs, set the two env vars the Blueprint intentionally leaves blank (`sync: false` in the file — see the comment at the top of `render.yaml` for why these can't be auto-wired):
-   - Backend service → Environment → `CLIENT_ORIGIN` → the frontend's URL
-   - Frontend service → Environment → `VITE_SERVER_URL` → the backend's URL
-3. Save each (triggers a redeploy of that service — the frontend one specifically needs a rebuild since `VITE_SERVER_URL` is baked in at build time, not read at runtime).
-
-That's the entire manual part — everything else (build commands, start command, migration-on-boot, `DATABASE_URL` wiring) is already in the file.
-
-### Option B — Manual, one resource at a time
-
-Equivalent to the Blueprint above, done by hand through the dashboard — useful if you want to see exactly what each setting does, or aren't using the Blueprint flow.
-
-#### 1. PostgreSQL
+### 1. PostgreSQL
 
 Render dashboard → **New +** → **PostgreSQL** → create it → copy the **Internal Database URL**.
 
-#### 2. Backend — Web Service
+### 2. Backend — Web Service
 
 **New +** → **Web Service** → connect this repo.
 
@@ -272,7 +258,7 @@ Environment variables:
 
 `PORT` is injected automatically by Render — don't set it. Running `npm run migrate` on every boot is safe: [schema.sql](server/src/db/schema.sql) uses `CREATE TABLE IF NOT EXISTS`, so it's a no-op after the first successful run.
 
-#### 3. Frontend — Static Site
+### 3. Frontend — Static Site
 
 **New +** → **Static Site** → same repo.
 
@@ -290,11 +276,11 @@ Environment variable:
 
 This must be set **before** the build runs — Vite bakes env vars into the JS bundle at build time, it doesn't read them at runtime.
 
-#### 4. Wire them together
+### 4. Wire them together
 
 Go back to the backend service → Environment → set `CLIENT_ORIGIN` to the actual Static Site URL from step 3 → save (triggers a redeploy). In production, CORS only trusts the exact configured `CLIENT_ORIGIN` — the `localhost:*` wildcard used for local dev is disabled once `NODE_ENV=production`.
 
-### Verify (either option)
+### 5. Verify
 
 Open the frontend URL, create a room, join from a second tab with the code, confirm play/pause/seek/change-video sync. Check the backend's Render logs for `Rehydrated N room(s) from Postgres` on boot to confirm the DB connection is live. Once confirmed, update the **Live Demo** URL at the top of this README.
 
