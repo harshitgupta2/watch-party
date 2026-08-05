@@ -25,9 +25,7 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 }
 
 const corsOptions = {
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    callback(null, isAllowedOrigin(origin));
-  },
+  origin: "*", // Allow all origins
 };
 
 const app = express();
