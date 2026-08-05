@@ -1,0 +1,50 @@
+# Render Blueprint — provisions all three pieces of this app in one go:
+# a PostgreSQL database, the Express + Socket.IO backend, and the Vite
+# static frontend. Connect this repo as a Blueprint in the Render
+# dashboard (New + -> Blueprint) and it reads this file automatically.
+#
+# Two env vars below are marked `sync: false` on purpose, not an oversight:
+# CLIENT_ORIGIN and VITE_SERVER_URL each need the OTHER service's public
+# https://*.onrender.com URL, which only exists after that service's first
+# deploy. Render's fromService/fromDatabase references only resolve
+# *private*-network addresses (no https:// scheme, and static sites can't
+# be a fromService target at all) — there's no way to auto-wire two public
+# URLs to each other in a Blueprint. Deploy once, copy each URL from the
+# Render dashboard into the other service's env vars, then redeploy.
+
+databases:
+  - name: watchparty-db
+    databaseName: watchparty
+    user: watchparty
+    plan: free
+
+services:
+  - type: web
+    name: watchparty-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install && npm run build
+    # Running the migration on every boot is safe — schema.sql uses
+    # CREATE TABLE IF NOT EXISTS, so it's a no-op after the first deploy.
+    startCommand: npm run migrate && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: watchparty-db
+          property: connectionString
+      - key: CLIENT_ORIGIN
+        sync: false # set to the watchparty-client URL after its first deploy
+
+  - type: web
+    name: watchparty-client
+    runtime: static
+    rootDir: client
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_SERVER_URL
+        sync: false # set to the watchparty-server URL after its first deploy
