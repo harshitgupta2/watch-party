@@ -9,6 +9,7 @@ import { registerRoomHandlers } from './sockets/roomHandlers';
 import { registerPlaybackHandlers } from './sockets/playbackHandlers';
 import { registerRoleHandlers } from './sockets/roleHandlers';
 
+
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -25,12 +26,15 @@ function isAllowedOrigin(origin: string | undefined): boolean {
 }
 
 const corsOptions = {
-  origin: "*", // Allow all origins
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    callback(null, isAllowedOrigin(origin));
+  },
 };
 
 const app = express();
 app.use(cors(corsOptions));
 app.use(express.json());
+
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
@@ -41,6 +45,7 @@ const roomManager = new RoomManager(io);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/rooms', roomsRouter(roomManager));
+
 
 io.on('connection', (socket) => {
   registerRoomHandlers(socket, roomManager);
