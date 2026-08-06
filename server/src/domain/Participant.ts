@@ -5,6 +5,10 @@ const ROLE_MANAGEMENT_ROLES: Role[] = ['host'];
 
 export class Participant {
   public socketId: string;
+  // False while the participant's socket is dropped but their identity is
+  // still being held through the reconnect grace window (see roomHandlers).
+  // Lets a stale disconnect avoid removing someone who has already reconnected.
+  public connected = true;
 
   constructor(
     public readonly userId: string,

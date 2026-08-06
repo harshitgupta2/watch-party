@@ -27,6 +27,16 @@ declare global {
   }
 }
 
+// YouTube IFrame player state codes -> readable names, for logging.
+const YT_STATE: Record<number, string> = {
+  [-1]: 'unstarted',
+  0: 'ended',
+  1: 'playing',
+  2: 'paused',
+  3: 'buffering',
+  5: 'cued',
+};
+
 let apiPromise: Promise<void> | null = null;
 
 function loadYouTubeApi(): Promise<void> {
@@ -50,6 +60,11 @@ export function useYouTubePlayer(elementId: string) {
   const playerRef = useRef<YTPlayer | null>(null);
   const loadedVideoIdRef = useRef<string | null>(null);
   const lastAppliedTimeRef = useRef<number | null>(null);
+  // Whether the room's latest state wants the video playing. The autoplay
+  // recovery timer consults this so a play that a later pause superseded isn't
+  // force-resumed.
+  const desiredPlayingRef = useRef(false);
+  const recoverTimerRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [muted, setMuted] = useState(true);
 
@@ -79,8 +94,29 @@ export function useYouTubePlayer(elementId: string) {
             // included, since even their own click only reaches playVideo()
             // after a server round trip. Muted autoplay is always allowed,
             // so every player starts muted; users unmute with a real click.
+            console.log('[watchme][player] ready');
             e.target.mute();
             setReady(true);
+          },
+          // Event-driven enforcement of the room's play state. onStateChange
+          // fires on every real change in the player — including when the
+          // browser SILENTLY blocks a programmatic play() and the video just
+          // stays paused. If the server says the room is PLAYING but our
+          // player has fallen to paused/cued, re-assert play, muted (always
+          // allowed). This keeps a viewer in sync regardless of *why*
+          // playback stalled: autoplay policy, buffering settle, ad end, etc.
+          onStateChange: (e: { data: number; target: YTPlayer }) => {
+            console.log(
+              `[watchme][player] state -> ${YT_STATE[e.data] ?? e.data} | room wants: ${desiredPlayingRef.current ? 'playing' : 'paused'}`,
+            );
+            if (desiredPlayingRef.current && (e.data === 2 || e.data === 5)) {
+              const p = e.target;
+              if (!p.isMuted()) {
+                p.mute();
+                setMuted(true);
+              }
+              p.playVideo();
+            }
           },
         },
       });
@@ -88,6 +124,10 @@ export function useYouTubePlayer(elementId: string) {
 
     return () => {
       cancelled = true;
+      if (recoverTimerRef.current !== null) {
+        window.clearTimeout(recoverTimerRef.current);
+        recoverTimerRef.current = null;
+      }
       playerRef.current?.destroy();
       playerRef.current = null;
       loadedVideoIdRef.current = null;
@@ -97,6 +137,53 @@ export function useYouTubePlayer(elementId: string) {
     };
   }, [elementId]);
 
+  // A programmatic play() on a viewer tab that hasn't had a direct user gesture
+  // is rejected by the browser's autoplay policy UNLESS the player is muted —
+  // and because the YouTube video runs in a cross-origin iframe, the viewer
+  // clicking our own "unmute" button never counts as a gesture inside that
+  // iframe. So once a viewer unmutes, host-driven plays get silently blocked
+  // and they fall out of sync. To keep everyone in sync regardless: if the
+  // video hasn't actually started shortly after we asked it to, mute and retry
+  // (muted playback is always allowed). Sound then just needs one more click.
+  const ensurePlaying = useCallback(() => {
+    if (recoverTimerRef.current !== null) window.clearTimeout(recoverTimerRef.current);
+    let attempts = 0;
+    const check = () => {
+      recoverTimerRef.current = null;
+      const player = playerRef.current;
+      if (!player || !desiredPlayingRef.current) return; // host paused meanwhile
+      const state = player.getPlayerState();
+      // 1 = playing, 3 = buffering (about to play) — we're in sync, done.
+      if (state === 1 || state === 3) return;
+      // Otherwise the play was blocked (or the player wasn't ready yet).
+      // Guarantee muted playback, which the browser always allows, and keep
+      // retrying for a short window since mute()/playVideo() are async and the
+      // first attempt can race the player becoming ready.
+      if (!player.isMuted()) {
+        player.mute();
+        setMuted(true);
+      }
+      player.playVideo();
+      if (attempts++ < 4) recoverTimerRef.current = window.setTimeout(check, 400);
+    };
+    recoverTimerRef.current = window.setTimeout(check, 500);
+  }, []);
+
+  // Symmetric safety net for pause: seekTo()'s async completion can re-assert
+  // "playing" just after we pause, so verify shortly after and re-pause if the
+  // video slipped back into playing/buffering. Guards against a viewer that
+  // keeps playing after the host hit pause.
+  const ensurePaused = useCallback(() => {
+    if (recoverTimerRef.current !== null) window.clearTimeout(recoverTimerRef.current);
+    recoverTimerRef.current = window.setTimeout(() => {
+      recoverTimerRef.current = null;
+      const player = playerRef.current;
+      if (!player || desiredPlayingRef.current) return; // host resumed meanwhile
+      const state = player.getPlayerState();
+      if (state === 1 || state === 3) player.pauseVideo();
+    }, 500);
+  }, []);
+
   // Only calls loadVideoById/seekTo when the video or the server's stored
   // time actually changed since the last applied state — the server does
   // NOT advance `currentTime` while a video plays (only on seek/change
@@ -105,9 +192,17 @@ export function useYouTubePlayer(elementId: string) {
   const applyRemoteState = useCallback(
     (videoId: string | null, playState: 'playing' | 'paused', currentTime: number) => {
       const player = playerRef.current;
-      if (!player || !ready) return;
+      if (!player || !ready) {
+        console.log(`[watchme][player] applyRemoteState SKIPPED (player=${!!player}, ready=${ready})`);
+        return;
+      }
+
+      desiredPlayingRef.current = playState === 'playing';
 
       const isNewVideo = videoId !== null && videoId !== loadedVideoIdRef.current;
+      console.log(
+        `[watchme][player] applyRemoteState -> playState=${playState} time=${currentTime.toFixed(2)} newVideo=${isNewVideo} currentPlayerState=${YT_STATE[player.getPlayerState()] ?? '?'}`,
+      );
 
       if (isNewVideo) {
         loadedVideoIdRef.current = videoId;
@@ -120,6 +215,7 @@ export function useYouTubePlayer(elementId: string) {
         // loading then correcting.
         if (playState === 'playing') {
           player.loadVideoById(videoId, currentTime);
+          ensurePlaying();
         } else {
           player.cueVideoById(videoId, currentTime);
         }
@@ -127,18 +223,24 @@ export function useYouTubePlayer(elementId: string) {
       }
 
       const isExplicitSeek = currentTime !== lastAppliedTimeRef.current;
-      if (isExplicitSeek) {
-        player.seekTo(currentTime, true);
-        lastAppliedTimeRef.current = currentTime;
-      }
+      if (isExplicitSeek) lastAppliedTimeRef.current = currentTime;
 
       if (playState === 'playing') {
+        // Seek first, then play — playing from the right spot.
+        if (isExplicitSeek) player.seekTo(currentTime, true);
         player.playVideo();
+        ensurePlaying();
       } else {
+        // Pause BEFORE seeking. seekTo() on a *playing* player keeps it playing
+        // and its async completion can override a pause issued right after — so
+        // pause first, then seek the now-paused player to the exact spot (it
+        // stays paused, showing that frame).
         player.pauseVideo();
+        if (isExplicitSeek) player.seekTo(currentTime, true);
+        ensurePaused();
       }
     },
-    [ready],
+    [ready, ensurePlaying, ensurePaused],
   );
 
   const getCurrentTime = useCallback((): number => playerRef.current?.getCurrentTime() ?? 0, []);
