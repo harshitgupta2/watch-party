@@ -32,18 +32,12 @@ export class RoomManager {
   deleteIfEmpty(code: string): void {
     const room = this.rooms.get(code);
     if (room && room.participantCount === 0) {
-      // Only evicted from the live in-memory map — the Postgres row is left
-      // in place so the room code and its last playback state survive a
-      // server restart (see rehydrate()).
+
       this.rooms.delete(code);
     }
   }
 
-  // Re-populates the in-memory map from Postgres on server boot, so room
-  // codes/videoId/playback position created before a restart are still
-  // valid. Participant lists are NOT restored — sockets are gone, so the
-  // first person to (re)join a restored room becomes its host again, same
-  // as any other fresh room.
+  // Re-populates the in-memory map from Postgres on server boot
   async rehydrate(): Promise<void> {
     const persistedRooms: PersistedRoom[] = await loadAllRooms();
     for (const row of persistedRooms) {

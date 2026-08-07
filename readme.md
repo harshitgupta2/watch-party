@@ -6,6 +6,10 @@ A real-time watch party app that lets multiple people watch YouTube videos toget
 
 **App:** https://watch-party-frontend-watt.onrender.com/
 
+## Demo Video
+
+**Video:** https://www.loom.com/share/99114707d0ba4f60a361198ada1b90e1
+
 > Note: the backend is hosted on Render's free tier, so the first request after a period of inactivity may take ~30–60 seconds to wake up.
 
 ## Tech Stack
