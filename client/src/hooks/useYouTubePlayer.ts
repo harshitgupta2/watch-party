@@ -39,7 +39,11 @@ const YT_STATE: Record<number, string> = {
 
 let apiPromise: Promise<void> | null = null;
 
-function loadYouTubeApi(): Promise<void> {
+// Exported so callers (e.g. the Home page) can start downloading the YouTube
+// IFrame API *before* a room is opened. The result is memoized in apiPromise,
+// so by the time the Room mounts the script is already cached and the player
+// constructs instantly instead of waiting ~1-2s on the first room.
+export function loadYouTubeApi(): Promise<void> {
   if (apiPromise) return apiPromise;
 
   apiPromise = new Promise((resolve) => {

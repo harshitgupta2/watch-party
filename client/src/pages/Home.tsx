@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createRoom, fetchRoom } from '../lib/api';
+import { loadYouTubeApi } from '../hooks/useYouTubePlayer';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -9,6 +10,13 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Pre-fetch the YouTube IFrame API while the user is still on this screen, so
+  // the player is ready the instant they enter a room (removes the first-room
+  // load delay). Memoized, so it only downloads once.
+  useEffect(() => {
+    loadYouTubeApi();
+  }, []);
 
   const goToRoom = (code: string) => {
     sessionStorage.setItem('username', username.trim());
